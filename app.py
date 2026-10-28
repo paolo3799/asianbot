@@ -23,7 +23,7 @@ def PF(s):
 def RED(td):
  if not td: return False
  h=str(td).lower()
- return "red" in h or "ff0000" in h or "#f00" in h or "background:#f" in h or "color:red" in h or "color:#f" in h
+ return "red" in h or "ff0000" in h or "#f00" in h or "color:red" in h or "background:#f" in h
 def MAIL(sub,html):
  try:
   r=requests.post("https://api.brevo.com/v3/smtp/email",headers={"api-key":KEY,"Content-Type":"application/json"},json={"sender":{"email":SND},"to":[{"email":TO}],"subject":sub,"htmlContent":html},timeout=20)
@@ -42,9 +42,23 @@ def home():return f"ON R1-R5 49-65 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
 @app.route("/debug")
 def dbg():h=F();return jsonify({"len":len(h),"ok":len(h)>5000})
 @app.route("/reset")
-def reset():S([]);return jsonify({"reset":True,"msg":"DB svuotato"})
+def reset():S([]);return jsonify({"reset":True})
 @app.route("/stats")
 def stats():return jsonify(L())
+
+@app.route("/live")
+def live():
+ h=F(); soup=BS(h,"html.parser"); out=[]
+ for tr in soup.find_all("tr"):
+  tds=tr.find_all("td")
+  if len(tds)<3:continue
+  txt=tr.get_text(" ",strip=True)
+  mm=re.search(r"(\d+)\s*['′]",txt)
+  if not mm:continue
+  m=int(mm.group(1))
+  if 40<=m<=75:
+   out.append(txt[:180])
+ return jsonify({"live_40_75":out[:30],"count":len(out)})
 
 @app.route("/scan")
 def scan():
@@ -52,59 +66,51 @@ def scan():
   db=L();fnd=[];h=F()
   if not h:return jsonify({"trovati":[],"tot":len(db),"err":"no html"})
   soup=BS(h,"html.parser")
+  last_a="A";last_b="B";last_m=0;last_ris=""
   for tr in soup.find_all("tr"):
    tds=tr.find_all("td")
-   if len(tds)<6:continue
+   if len(tds)<3:continue
    txt=tr.get_text(" ",strip=True)
    mm=re.search(r"(\d+)\s*['′]",txt)
-   if not mm:continue
-   m=int(mm.group(1))
-   if not(49<=m<=65):continue
    mr=re.search(r"(\d+)\s*-\s*(\d+)",txt)
-   if not mr:continue
-   ris=f"{mr.group(1)}-{mr.group(2)}"
+   if mm and mr and ("ht" in txt.lower() or "ck" in txt.lower()):
+    last_m=int(mm.group(1));last_ris=f"{mr.group(1)}-{mr.group(2)}"
+    cols=[td.get_text(" ",strip=True) for td in tds]
+    if len(cols)>=2:
+     last_a=cols[0][:30];last_b=cols[1][:30] if len(cols)>1 else "B"
+    continue
+   if not(49<=last_m<=65):continue
    cols=[td.get_text(" ",strip=True) for td in tds]
-   camp=cols[0] if cols else "";a=cols[2] if len(cols)>2 else "A";b=cols[3] if len(cols)>3 else "B"
    scu=sop=None;scu_r=sop_r="";red=False
    for i in range(len(cols)-1):
     cu=PF(cols[i]);op=PF(cols[i+1])
     if cu is None or op is None:continue
-    if abs(cu)<=4 and abs(op)<=4:
+    if abs(cu)<=4 and abs(op)<=4 and cu!=0 and op!=0:
      scu=cu;sop=op;scu_r=cols[i];sop_r=cols[i+1]
-     # FIX ROSSO: controlla entrambe le colonne CU e OP
      td_cu=tds[i] if i < len(tds) else None
      td_op=tds[i+1] if i+1 < len(tds) else None
      if RED(td_cu) or RED(td_op):red=True
      break
    if scu is None:continue
-   mid=f"{a}-{b}-{m}-{ris}-{scu_r}".replace(" ","_")
+   mid=f"{last_a}-{last_b}-{last_m}-{last_ris}-{scu_r}".replace(" ","_")
    if any(x.get("id")==mid for x in db):continue
    bet=reg=None;cond=(scu>0 and scu>sop) or (scu<0 and scu<sop)
-   # TUTTE 49-65
-   if ris=="0-1" and scu!=sop and red:bet="OVER 1.5";reg="R5"
-   elif ris=="0-0" and cond:bet="OVER 0.5";reg="R1"
-   elif ris=="1-0" and abs(scu)>=0.75 and cond:bet="OVER 1.5";reg="R2"
-   elif ris=="0-1" and abs(scu)>=0.75 and cond:bet="OVER 1.5";reg="R3"
-   elif ris=="1-1" and abs(scu)>=1 and cond:bet="OVER 2.5";reg="R4"
+   if last_ris=="0-1" and scu!=sop and red:bet="OVER 1.5";reg="R5"
+   elif last_ris=="0-0" and cond:bet="OVER 0.5";reg="R1"
+   elif last_ris=="1-0" and abs(scu)>=0.75 and cond:bet="OVER 1.5";reg="R2"
+   elif last_ris=="0-1" and abs(scu)>=0.75 and cond:bet="OVER 1.5";reg="R3"
+   elif last_ris=="1-1" and abs(scu)>=1 and cond:bet="OVER 2.5";reg="R4"
    if bet:
-    ok=MAIL(f"[{reg}] {a} vs {b} {ris} {m}' {bet}",f"{camp}<br>{a} vs {b}<br>{m}' {ris} {bet}<br>CU:{scu_r} OP:{sop_r} RED:{red}<br>49-65")
-    if ok: # FIX: salva solo se mail partita davvero
-     db.append({"id":mid,"ora":DT.now().strftime("%H:%M"),"a":a,"b":b,"m":m,"ris":ris,"bet":bet,"reg":reg})
-     fnd.append(f"{reg} {a}-{b} {ris} {m}'")
-    else:
-     fnd.append(f"{reg} {a}-{b} {ris} {m}' MAIL FAIL")
+    ok=MAIL(f"[{reg}] {last_a} vs {last_b} {last_ris} {last_m}' {bet}",f"{last_a} vs {last_b} {last_m}' {last_ris} {bet} CU:{scu_r} OP:{sop_r} RED:{red}")
+    if ok:
+     db.append({"id":mid,"ora":DT.now().strftime("%H:%M"),"a":last_a,"b":last_b,"m":last_m,"ris":last_ris,"bet":bet,"reg":reg})
+     fnd.append(f"{reg} {last_a}-{last_b} {last_ris} {last_m}'")
   S(db);return jsonify({"trovati":fnd,"tot":len(db),"range":"49-65"})
  except Exception as e:return jsonify({"error":str(e),"trovati":[]})
 
-@app.route("/test_r1")
-def t1():ok=MAIL("[R1] TEST 0-0 49-65","TEST R1 OVER 0.5 49-65");return jsonify({"sent":ok})
-@app.route("/test_r3")
-def t3():ok=MAIL("[R3] TEST 0-1 49-65","TEST R3 OVER 1.5 49-65");return jsonify({"sent":ok})
-@app.route("/test_r5")
-def t5():ok=MAIL("[R5] TEST 0-1 RED 49-65","Turkey TEST 0-1 49-65 SPREAD ROSSO");return jsonify({"sent":ok})
 @app.route("/test_all")
 def tall():
  r1=MAIL("[R1] TEST 0-0 49-65","TEST R1");r3=MAIL("[R3] TEST 0-1 49-65","TEST R3");r5=MAIL("[R5] TEST 0-1 RED 49-65","TEST R5")
- return jsonify({"r1":r1,"r3":r3,"r5":r5,"all_sent":r1 and r3 and r5})
+ return jsonify({"r1":r1,"r3":r3,"r5":r5})
 
 if __name__=="__main__":app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
