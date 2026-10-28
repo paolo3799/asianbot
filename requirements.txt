@@ -1,4 +1,6 @@
 Flask==2.3.3
-requests
-pytz
-gunicorn
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+sib-api-v3-sdk==7.6.0
+gunicorn==21.2.0
