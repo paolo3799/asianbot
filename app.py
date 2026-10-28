@@ -179,7 +179,8 @@ def scan_livescore():
                     "spread_op": sop_raw,
                     "total_cu": tcu_raw,
                     "total_op": top_raw,
-                    "link_asian": link
+                    "link_asian": link,
+                    "esito": "PENDING"
                 })
                 found_now.append(mid)
         except Exception as e:
@@ -190,17 +191,55 @@ def scan_livescore():
 
 @app.route("/")
 def home():
-    return f"Bot 4 REGOLE ON - R1 OVER 0.5 | R2 OVER 1.5 | R3 OVER 1.5 | R4 OVER 2.5 - Tot {len(load_db())}"
+    db = load_db()
+    return f"Bot 4 REGOLE ON - R1 0-0 OVER 0.5 | R2 1-0 OVER 1.5 | R3 0-1 OVER 1.5 | R4 1-1 OVER 2.5 - Tot:{len(db)}"
 
 @app.route("/scan")
 def scan():
-    return jsonify({"trovati": scan_livescore(), "tot": len(load_db())})
+    found = scan_livescore()
+    return jsonify({"trovati": found, "tot_db": len(load_db())})
+
+@app.route("/stats")
+def stats():
+    db = load_db()
+    def cnt(r):
+        return len([x for x in db if x.get("regola")==r])
+    return jsonify({
+        "totale": len(db),
+        "R1_OVER_0.5": cnt("R1"),
+        "R2_OVER_1.5": cnt("R2"),
+        "R3_OVER_1.5": cnt("R3"),
+        "R4_OVER_2.5": cnt("R4"),
+        "dettaglio": db
+    })
+
+@app.route("/history")
+def history():
+    return jsonify(load_db())
 
 @app.route("/test_mail")
 def test_mail():
-    html = build_email("TEST", "A", "B", 55, "0-0", "OVER 0.5 TEST R1", "-0.75", "-0.5", "2.5", "2.25", ASIAN_URL)
-    send_email("TEST R1", html)
-    return "ok"
+    html = build_email("TEST CAMPIONATO", "Team A", "Team B", 55, "0-0", "OVER 0.5 TEST R1", "-0.75", "-0.5", "2.5", "2.25", ASIAN_URL)
+    send_email("[R1] TEST R1 - 0-0 OVER 0.5", html)
+    return "ok R1 sent"
+
+@app.route("/test_r2")
+def test_r2():
+    html = build_email("SERIE A TEST", "Juventus", "Inter", 55, "1-0", "OVER 1.5 TEST R2", "1.0", "0.5", "3.0", "2.75", ASIAN_URL)
+    send_email("[R2] TEST R2 - 1-0 OVER 1.5", html)
+    return "ok R2 sent"
+
+@app.route("/test_r3")
+def test_r3():
+    html = build_email("PREMIER TEST", "Arsenal", "Chelsea", 58, "0-1", "OVER 1.5 TEST R3", "-0.75", "-0.25", "2.75", "2.5", ASIAN_URL)
+    send_email("[R3] TEST R3 - 0-1 OVER 1.5", html)
+    return "ok R3 sent"
+
+@app.route("/test_r4")
+def test_r4():
+    html = build_email("BUNDESLIGA TEST", "Bayern", "Dortmund", 52, "1-1", "OVER 2.5 TEST R4", "-1.25", "-0.75", "4.0", "3.5", ASIAN_URL)
+    send_email("[R4] TEST R4 - 1-1 OVER 2.5", html)
+    return "ok R4 sent"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
