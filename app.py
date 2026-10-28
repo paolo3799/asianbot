@@ -9,7 +9,7 @@ DB='db.json'
 TO='paolo.zapp82@yahoo.com'
 U='https://www.asianbetsoccer.com/livescore.html'
 BASE='https://www.asianbetsoccer.com'
-H={'User-Agent':'Mozilla/5.0 Chrome/124.0','Referer':BASE+'/'}
+H={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0','Referer':'https://www.google.com/'}
 KEY=os.environ.get('BREVO_KEY','')
 
 def L():
@@ -33,57 +33,54 @@ def MAIL(sub,html):
         return r.status_code<400
     except: return False
 
+def GET(url):
+    # prova 3 modi diversi per bypassare blocco Oregon
+    for u in [url, f'https://api.allorigins.win/raw?url={url}', f'https://corsproxy.io/?{url}', f'https://api.codetabs.com/v1/proxy?quest={url}']:
+        try:
+            t=requests.get(u,headers=H,timeout=20).text
+            if len(t)>2000: return t
+        except: pass
+    return ''
+
 def F():
-    try: html=requests.get(U,headers=H,timeout=20).text
-    except: return ''
+    html=GET(U)
+    if len(html)<2000: return html
     combined=html
     soup=BS(html,'html.parser')
     for script in soup.find_all('script',src=True):
         src=script['src']
-        if any(k in src.lower() for k in ['live','score','odd','data','match']):
-            if src.startswith('/'): src=BASE+src
-            elif not src.startswith('http'): src=BASE+'/'+src
-            try:
-                js=requests.get(src,headers=H,timeout=15).text
-                if len(js)>1000: combined+='\n'+js
-            except: pass
-    for extra in ['/js/livescore.js','/js/data.js','/livescore_data.js','/data/live.js']:
-        try:
-            js=requests.get(BASE+extra,headers=H,timeout=10).text
-            if len(js)>2000: combined+='\n'+js
-        except: pass
+        if src.startswith('/'): src=BASE+src
+        elif not src.startswith('http'): src=BASE+'/'+src
+        if any(k in src.lower() for k in ['live','score','odd','data']):
+            js=GET(src)
+            if len(js)>1000: combined+='\n'+js
     return combined
 
 @app.route('/')
-def home(): return f"ON R1-R5 40-75 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
+def home(): return f"ON R1-R5 40-75 Tot:{len(L())} {DT.now().strftime('%H:%M')} len:{len(F())}"
 
 @app.route('/debug')
 def dbg():
     h=F()
-    m=re.findall(r'\d+\s*-\s*\d+',h)
-    return jsonify({'len':len(h),'ok':len(h)>5000,'scores_found':len(m),'snippet':h[3000:6000]})
+    return jsonify({'len':len(h),'ok':len(h)>5000,'scores_found':len(re.findall(r'\d+\s*-\s*\d+',h)),'snippet':h[2000:5000]})
 
 @app.route('/live')
 def live():
     h=F()
-    if not h: return jsonify({'count':0,'len':0,'err':'no html'})
+    if len(h)<1000: return jsonify({'count':0,'len':len(h),'err':'bloccato'})
     soup=BS(h,'html.parser')
     out=[]
     for tr in soup.find_all('tr'):
         txt=tr.get_text(' ',strip=True)
-        if re.search(r'\d+\s*-\s*\d+',txt) and len(txt)<250:
+        if re.search(r'\d+\s*-\s*\d+',txt) and len(txt)<300:
             out.append(txt[:200])
-    if len(out)<5:
-        for line in h.split('\n'):
-            if re.search(r'\d+\s*-\s*\d+',line) and len(line)<300 and 'Asian' not in line:
-                out.append(line.strip()[:200])
     return jsonify({'live':out[:80],'count':len(out),'len':len(h)})
 
 @app.route('/scan')
 def scan():
     try:
         db=L();fnd=[];h=F()
-        if not h: return jsonify({'trovati':[],'tot':len(db),'err':'no html'})
+        if len(h)<1000: return jsonify({'trovati':[],'tot':len(db),'len':len(h),'err':'bloccato'})
         soup=BS(h,'html.parser')
         last_a='A';last_b='B';last_m=0;last_ris=''
         for tr in soup.find_all('tr'):
@@ -98,12 +95,12 @@ def scan():
                 last_a=cols[0][:30];last_b=cols[1][:30]
                 if mm: continue
             if not(40<=last_m<=75): continue
-            scu=sop=None;scu_r=sop_r='';red=False
+            scu=sop=None;scu_r='';red=False
             for i in range(len(cols)-1):
                 cu=PF(cols[i]);op=PF(cols[i+1])
                 if cu is None or op is None: continue
                 if abs(cu)<=4 and abs(op)<=4 and cu!=0 and op!=0:
-                    scu=cu;sop=op;scu_r=cols[i];sop_r=cols[i+1]
+                    scu=cu;sop=op;scu_r=cols[i]
                     if RED(tds[i]) or RED(tds[i+1]): red=True
                     break
             if scu is None: continue
@@ -118,7 +115,7 @@ def scan():
             elif last_ris=='1-1' and abs(scu)==1 and cond: bet='OVER 2.5';reg='R4'
             if bet:
                 subj=f"[{reg}] {last_a} vs {last_b} ({last_ris}) {bet} {last_m}'"
-                html=f"{last_a} vs {last_b} {last_m}' {last_ris} {bet}<br>{scu_r} vs {sop_r} red={red}"
+                html=f"{last_a} vs {last_b} {last_m}' {last_ris} {bet}<br>{scu_r} red={red}"
                 if MAIL(subj,html):
                     db.append({'id':mid,'ora':DT.now().strftime('%H:%M'),'a':last_a,'b':last_b,'m':last_m,'ris':last_ris,'bet':bet,'reg':reg})
                     fnd.append({'reg':reg,'match':f"{last_a} vs {last_b}",'bet':bet})
