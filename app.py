@@ -5,7 +5,7 @@ import pytz
 
 app = Flask(__name__)
 
-FROM_EMAIL = "paolo.zapp82@gmail.com"
+FROM_EMAIL = "paolo.zapp82@yahoo.com"
 TO_EMAIL = "paolo.zapp82@yahoo.com"
 TZ = pytz.timezone("Europe/Rome")
 
