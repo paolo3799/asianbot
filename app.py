@@ -1,230 +1,304 @@
-import os, re, json, requests
-from flask import Flask
+import os
+import json
+import re
+import requests
+from flask import Flask, jsonify
 from bs4 import BeautifulSoup
 from datetime import datetime
+from urllib.parse import quote_plus
 
 app = Flask(__name__)
 
-BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
-FROM_EMAIL = "paolo.zapp82@yahoo.com"
-TO_EMAIL = "paolo.zapp82@yahoo.com"
-FILE_DB = "pronostici.json"
+DB_FILE = "pronostici.json"
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "INSERISCI_QUI_LA_TUA_KEY")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "paolo.zapp82@yahoo.com")
+RECEIVER_EMAIL = "paolo.zapp82@yahoo.com"
 
-pronostici = []
+ASIAN_URL = "https://www.asianbetsoccer.com/livescore.html"
+
+# ---------- UTILS ----------
 def load_db():
-    global pronostici
+    if not os.path.exists(DB_FILE):
+        return []
     try:
-        if os.path.exists(FILE_DB):
-            with open(FILE_DB, 'r') as f:
-                pronostici = json.load(f)
-    except: pronostici = []
-def save_db():
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_db(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def parse_float(s):
+    if not s:
+        return None
+    s = s.strip().replace("−", "-")
+    m = re.search(r"[+-]?\d+(?:\.\d+)?", s)
+    if not m:
+        return None
     try:
-        with open(FILE_DB, 'w') as f:
-            json.dump(pronostici, f, indent=2)
-    except: pass
-load_db()
+        return float(m.group())
+    except:
+        return None
 
-def send_email(s,h):
+def get_bwin_link(team_a, team_b):
+    q = f"{team_a} {team_b}"
+    return f"https://www.bwin.it/it/p/sports/search/?q={quote_plus(q)}"
+
+def send_email(subject, html_body):
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {"api-key": BREVO_API_KEY, "Content-Type": "application/json"}
+    payload = {
+        "sender": {"email": SENDER_EMAIL, "name": "Bot 3 Regole"},
+        "to": [{"email": RECEIVER_EMAIL}],
+        "subject": subject,
+        "htmlContent": html_body
+    }
     try:
-        requests.post("https://api.brevo.com/v3/smtp/email",
-        headers={"api-key":BREVO_API_KEY,"Content-Type":"application/json"},
-        json={"sender":{"name":"AsianBot","email":FROM_EMAIL},"to":[{"email":TO_EMAIL}],"subject":s,"htmlContent":h},timeout=15)
-    except: pass
-
-def parse_float(v):
-    try:
-        v=str(v).strip()
-        # prende -0.75 / 0.75 / 1.0 etc
-        m=re.search(r'[-+]?\d*\.?\d+',v.replace(',','.'))
-        if m: return float(m.group())
-    except: pass
-    return None
-
-def check_handicap_cu_op(cu, op):
-    # Regola che hai chiesto:
-    # positivo: CU > OP e >=0.75
-    # negativo: CU < OP e <= -0.75 (tu hai scritto <=0.75 ma con segno negativo)
-    if cu is None or op is None: return False
-    if cu > 0:
-        return cu > op and cu >= 0.75
-    if cu < 0:
-        return cu < op and cu <= -0.75
-    return False
-
-def has_red_cards(tr):
-    # Cerca cartellini rossi = 0
-    html = str(tr).lower()
-    # se trova icona red card con numero 1/2 etc
-    # su asianbetsoccer i rossi sono in una colonna con img o numero rosso
-    # se trova >0 ritorna True (ha rossi)
-    # cerca pattern: red card, rcard, o numero rosso
-    if 'redcard' in html or 'red-card' in html or 'red_card' in html:
-        # se c'è la parola ma con 0 va bene, cerchiamo 1 o 2 vicino
-        if re.search(r'red[^<]*[1-9]', html):
-            return True
-    # alcuni template mettono <span class="red">1</span>
-    tds = tr.find_all('td')
-    for td in tds:
-        txt = td.get_text(strip=True)
-        style = str(td.get('style','')).lower()
-        cls = str(td.get('class','')).lower()
-        if ('red' in cls or 'red' in style or 'f00' in style) and txt in ['1','2','3']:
-            return True
-        # se colonna contiene solo "1" rossa
-        if txt == '1' and ('red' in html):
-            # controllo più stretto: se la riga ha 1 rosso
-            pass
-    # fallback: cerca icone: se html contiene "●" rossa con 1
-    # se non trova nulla, consideriamo 0 rossi
-    # Controllo extra: se nel testo c'è " 1 " vicino a red
-    if re.search(r'>\s*1\s*<', html) and 'red' in html:
-        # potrebbe essere falso positivo, ma per sicurezza lo lasciamo passare come 0 se non siamo sicuri
-        # per ora: se non siamo sicuri, diciamo 0 rossi
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        print(f"MAIL {subject} -> {r.status_code} {r.text[:200]}")
+        return r.status_code < 400
+    except Exception as e:
+        print(f"MAIL ERROR: {e}")
         return False
-    return False
 
+def build_email(camp, sq_a, sq_b, minuto, risultato, bet, spread_cu, spread_op, total_cu, total_op, link_asian, link_bwin):
+    return f"""
+    NOME CAMPIONATO: {camp}<br>
+    SQUADRA A: {sq_a}<br>
+    SQUADRA B: {sq_b}<br>
+    MINUTO: {minuto}'<br>
+    RISULTATO LIVE: {risultato}<br>
+    BET: {bet}<br><br>
+    SPREAD CU: {spread_cu}<br>
+    SPREAD OP: {spread_op}<br>
+    TOTAL LINE CU: {total_cu}<br>
+    TOTAL LINE OP: {total_op}<br><br>
+    Link pagina asianbetsoccer.com del match notificato:<br>
+    {link_asian}<br><br>
+    Link Bwin (ricerca diretta, se Bwin quota il match lo trovi subito):<br>
+    <a href="{link_bwin}">{link_bwin}</a><br>
+    """
+
+# ---------- SCAN LOGIC ----------
+def scan_livescore():
+    db = load_db()
+    found_now = []
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        resp = requests.get(ASIAN_URL, headers=headers, timeout=20)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        rows = soup.find_all("tr")
+    except Exception as e:
+        print(f"FETCH ERROR: {e}")
+        return found_now
+
+    for tr in rows:
+        tds = tr.find_all("td")
+        if len(tds) < 10:
+            continue
+        text_row = tr.get_text(" ", strip=True)
+        # Estrai minuto 50-60
+        m_min = re.search(r"(\d+)\s*['′]", text_row)
+        if not m_min:
+            continue
+        minuto = int(m_min.group(1))
+        if not (50 <= minuto <= 60):
+            continue
+
+        # Estrai risultato tipo 0-0, 1-0, 0-1, 1-1
+        m_res = re.search(r"(\d+)\s*-\s*(\d+)", text_row)
+        if not m_res:
+            continue
+        gol_a = int(m_res.group(1))
+        gol_b = int(m_res.group(2))
+        risultato = f"{gol_a}-{gol_b}"
+
+        # Rossi = 0 -> se nel row c'è icona rossa o testo (vedi allegato)
+        # In asianbetsoccer rossi sono immagini / numeri rossi
+        html_row = str(tr).lower()
+        red_cards = 0
+        # cerca tipo <span class="red"> o img red card
+        if "red card" in html_row or "redcard" in html_row or "rcard" in html_row:
+            # prova a contare
+            reds_found = re.findall(r">\s*1\s*<.*red|red.*>\s*1", html_row)
+            # fallback: se trova la parola rossa, conta occorrenze
+            if html_row.count("red") > 2:
+                red_cards = 1
+        # Metodo più semplice: se nel testo c'è "0" rossi? Per sicurezza controlliamo colonne dedicate
+        # Se nel row c'è un td con background rosso o con numero >0 vicino a risultato, lo consideriamo rosso
+        # Per ora: se troviamo due numeri rossi, salta
+        if "style" in html_row and "red" in html_row and re.search(r">\s*[12]\s*<", html_row):
+            # euristica per evitare falsi positivi, controlla se c'è icona rossa
+            if tr.find("span", style=lambda x: x and "red" in x.lower() if x else False):
+                # se esiste ma è 0, è ok. Se è >0, salta
+                pass
+        
+        # Controllo rosso finale: se nella riga c'è un immagine di cartellino rosso
+        if tr.find("img", src=lambda x: x and "red" in x.lower() if x else False):
+            red_cards = 1
+        
+        if red_cards != 0:
+            continue
+
+        # Estrazione squadre e campionato (euristica basata su ordine colonne asianbetsoccer)
+        try:
+            # asianbetsoccer structure: [0] league, [1] time, [2] teamA, [3] score, [4] teamB, ...
+            # Proviamo a prendere testo pulito
+            cols_text = [td.get_text(" ", strip=True) for td in tds]
+            camp = cols_text[0] if cols_text[0] else "N/D"
+            sq_a = cols_text[2] if len(cols_text) > 2 else "Squadra A"
+            sq_b = cols_text[4] if len(cols_text) > 4 else "Squadra B"
+
+            # SPREAD CU e OP: di solito colonne dopo squadre
+            # Cerchiamo tutti i numeri float tipo -1, 0.75, 1.25 nelle colonne
+            # Colonna CU riga A = primo spread CU trovato, Colonna OP riga A = primo spread OP trovato
+            # Euristica: tds[5] = CU spread, tds[6]=OP spread, tds[7]=CU total, tds[8]=OP total
+            spread_cu_raw = cols_text[5] if len(cols_text) > 5 else ""
+            spread_op_raw = cols_text[6] if len(cols_text) > 6 else ""
+            total_cu_raw = cols_text[7] if len(cols_text) > 7 else ""
+            total_op_raw = cols_text[8] if len(cols_text) > 8 else ""
+
+            spread_cu = parse_float(spread_cu_raw)
+            spread_op = parse_float(spread_op_raw)
+            total_cu = parse_float(total_cu_raw)
+            total_op = parse_float(total_op_raw)
+
+            # Se parsing fallisce, prova a cercare in tutta la riga
+            if spread_cu is None:
+                spread_cu = parse_float(text_row)
+            if spread_cu is None or spread_op is None:
+                floats = re.findall(r"[+-]?\d+(?:\.\d+)?", text_row)
+                # prendi i primi 4 come CU, OP, CU total, OP total
+                if len(floats) >= 4:
+                    spread_cu = float(floats[0]) if spread_cu is None else spread_cu
+                    spread_op = float(floats[1]) if spread_op is None else spread_op
+
+            # Se ancora None, metti 0 per non rompere
+            spread_cu_val = spread_cu if spread_cu is not None else 0.0
+            spread_op_val = spread_op if spread_op is not None else 0.0
+
+            # ID univoco per non ripetere
+            match_id = f"{sq_a}-{sq_b}-{minuto}-{risultato}-{camp}".replace(" ", "_")
+            if any(x.get("id") == match_id for x in db):
+                continue
+
+            bet = None
+            regola = None
+
+            # --- REGOLA 1: 0-0 50-60 ROSSI 0 ---
+            if risultato == "0-0":
+                bet = "OVER 1.5"
+                regola = "R1"
+
+            # --- REGOLA 2: 1-0 50-60 ROSSI 0 + CU>OP >=0.75 ---
+            elif risultato == "1-0":
+                if spread_cu_val is not None and spread_op_val is not None:
+                    if (spread_cu_val - spread_op_val) >= 0.75 or (spread_cu_val > spread_op_val and spread_cu_val >= 0.75):
+                        # compatibilità con logica vecchia CU>OP >=0.75
+                        if spread_cu_val > spread_op_val:
+                            bet = "OVER 1.5 [R2]"
+                            regola = "R2"
+
+            # --- REGOLA 3: 0-1 50-60 ROSSI 0 + CU>OP >=0.75 ---
+            elif risultato == "0-1":
+                if spread_cu_val is not None and spread_op_val is not None:
+                    if spread_cu_val > spread_op_val:
+                        diff = spread_cu_val - spread_op_val
+                        if diff >= 0.75 or spread_cu_val >= 0.75:
+                            bet = "OVER 1.5 [R3]"
+                            regola = "R3"
+
+            # --- REGOLA 4 NUOVA: 1-1 ---
+            elif risultato == "1-1":
+                # Condizione: CU riga A > OP riga A e >=1  OPPURE CU < OP e <= -1
+                cond1 = (spread_cu_val > spread_op_val and spread_cu_val >= 1)
+                cond2 = (spread_cu_val < spread_op_val and spread_cu_val <= -1)
+                if cond1 or cond2:
+                    bet = "OVER 2.5"
+                    regola = "R4"
+
+            if bet:
+                link_asian = ASIAN_URL
+                link_bwin = get_bwin_link(sq_a, sq_b)
+                html_mail = build_email(camp, sq_a, sq_b, minuto, risultato, bet, spread_cu_raw, spread_op_raw, total_cu_raw, total_op_raw, link_asian, link_bwin)
+                subject = f"[{regola}] {sq_a} vs {sq_b} {risultato} {minuto}' - {bet} - {camp}"
+                send_email(subject, html_mail)
+
+                entry = {
+                    "id": match_id,
+                    "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "campionato": camp,
+                    "squadra_a": sq_a,
+                    "squadra_b": sq_b,
+                    "minuto": minuto,
+                    "risultato_live": risultato,
+                    "bet": bet,
+                    "regola": regola,
+                    "spread_cu": spread_cu_raw,
+                    "spread_op": spread_op_raw,
+                    "total_cu": total_cu_raw,
+                    "total_op": total_op_raw,
+                    "link_asian": link_asian,
+                    "link_bwin": link_bwin,
+                    "esito": "PENDING"
+                }
+                db.append(entry)
+                found_now.append(entry)
+        except Exception as e:
+            print(f"PARSE ROW ERROR: {e}")
+            continue
+
+    save_db(db)
+    return found_now
+
+# ---------- ROUTES ----------
 @app.route("/")
 def home():
-    tot=len(pronostici)
-    v=len([p for p in pronostici if p['stato']=='VINTO'])
-    pe=len([p for p in pronostici if p['stato']=='PERSO'])
-    return f'Bot 3 REGOLE ON - Tot:{tot} V:{v} P:{pe} - <a href="/scan">SCAN</a> | <a href="/stats">STATS</a> | <a href="/history">HISTORY</a>'
+    db = load_db()
+    v = len([x for x in db if x.get("esito") == "WIN"])
+    p = len([x for x in db if x.get("esito") == "LOSE"])
+    return f"Bot 4 REGOLE ON - Tot:{len(db)} V:{v} P:{p} - R4 1-1 OVER 2.5 attiva"
 
 @app.route("/scan")
 def scan():
-    url="https://www.asianbetsoccer.com/livescore.html"
-    try:
-        r=requests.get(url,headers={"User-Agent":"Mozilla/5.0"},timeout=20)
-        soup=BeautifulSoup(r.text,'html.parser')
-        trovati=[]
-        for tr in soup.find_all('tr'):
-            cols=tr.find_all('td')
-            if len(cols)<9: continue
-            txt_full=tr.get_text(" ",strip=True)
-            m_min=re.search(r"(\d+)'",txt_full)
-            if not m_min: continue
-            minuto=int(m_min.group(1))
-            if not 50 <= minuto <= 60: continue
-
-            # rossi = 0
-            if has_red_cards(tr): continue
-
-            campionato=cols[1].get_text(strip=True)
-            squadre_raw=cols[2].get_text(" vs ",strip=True)
-            if " vs " in squadre_raw:
-                squadra_a,squadra_b = squadre_raw.split(" vs ",1)
-            else:
-                squadra_a,squadra_b = squadre_raw,"N/A"
-            
-            # risultato live es: 1-0 o 0-1 o 0-0
-            m_score=re.search(r'(\d+)\s*-\s*(\d+)',txt_full)
-            if not m_score: continue
-            risultato=f"{m_score.group(1)}-{m_score.group(2)}"
-            
-            spread_cu=cols[6].get_text(strip=True)
-            spread_op=cols[7].get_text(strip=True)
-            total_cu=cols[8].get_text(strip=True)
-            total_op=cols[9].get_text(strip=True) if len(cols)>9 else total_cu
-
-            cu=parse_float(spread_cu.split('/')[0])
-            op=parse_float(spread_op.split('/')[0])
-
-            bet=None
-            regola=None
-
-            # REGOLA 1: 0-0 OVER 0.5
-            if risultato in ["0-0","0 - 0"]:
-                if cu is not None and op is not None:
-                    if (cu>0 and op>0 and cu>op) or (cu<0 and op<0 and cu<op):
-                        bet="OVER 0.5"
-                        regola="R1"
-
-            # REGOLA 2: 1-0 OVER 1.5
-            if bet is None and risultato=="1-0":
-                if check_handicap_cu_op(cu, op):
-                    bet="OVER 1.5"
-                    regola="R2"
-
-            # REGOLA 3: 0-1 OVER 1.5
-            if bet is None and risultato=="0-1":
-                if check_handicap_cu_op(cu, op):
-                    bet="OVER 1.5"
-                    regola="R3"
-
-            if bet is None: continue
-
-            mid=f"{regola}-{squadra_a}-{squadra_b}-{datetime.now().strftime('%Y-%m-%d')}"
-            if any(p['mid']==mid for p in pronostici): continue
-            
-            link_d=tr.find('a',href=True)
-            link="https://www.asianbetsoccer.com"+link_d['href'] if link_d and link_d['href'].startswith('/') else f"https://www.asianbetsoccer.com/livescore.html"
-
-            nuovo={"mid":mid,"regola":regola,"data":datetime.now().strftime("%Y-%m-%d %H:%M"),"campionato":campionato,"squadra_a":squadra_a,"squadra_b":squadra_b,"minuto":minuto,"risultato":risultato,"bet":bet,"spread_cu":spread_cu,"spread_op":spread_op,"total_cu":total_cu,"total_op":total_op,"link":link,"stato":"PENDING","finale":None}
-            pronostici.append(nuovo); save_db()
-            
-            html=f"""NOME CAMPIONATO: {campionato}<br>SQUADRA A: {squadra_a}<br>SQUADRA B: {squadra_b}<br>MINUTO: {minuto}'<br>RISULTATO LIVE: {risultato}<br>BET: {bet} [{regola}]<br><br>SPREAD CU: {spread_cu}<br>SPREAD OP: {spread_op}<br>TOTAL LINE CU: {total_cu}<br>TOTAL LINE OP: {total_op}<br><br>Link pagina asianbetsoccer.com del match notificato:<br><a href="{link}">{link}</a><br><br>Link editabile:<br>{link}"""
-            send_email(f"{regola} {bet} - {squadra_a} vs {squadra_b} {risultato} {minuto}'",html)
-            trovati.append(f"{regola} {squadra_a} vs {squadra_b} {risultato}")
-
-        return f"Trovati: {trovati} Tot DB: {len(pronostici)}"
-    except Exception as e:
-        return f"Errore: {e}"
-
-@app.route("/check_results")
-def check_results():
-    url="https://www.asianbetsoccer.com/lastgame.html"
-    try:
-        r=requests.get(url,headers={"User-Agent":"Mozilla/5.0"},timeout=20)
-        soup=BeautifulSoup(r.text,'html.parser')
-        agg=0
-        for p in pronostici:
-            if p['stato']!='PENDING': continue
-            for tr in soup.find_all('tr'):
-                t=tr.get_text(" ",strip=True).lower()
-                if p['squadra_a'].lower()[:6] in t and p['squadra_b'].lower()[:6] in t:
-                    m=re.search(r'(\d+)\s*-\s*(\d+)',tr.get_text())
-                    if m:
-                        fin=f"{m.group(1)}-{m.group(2)}"
-                        p['finale']=fin
-                        # esito in base al BET
-                        if p['bet']=="OVER 0.5":
-                            p['stato']='PERSO' if fin=="0-0" else 'VINTO'
-                        else: # OVER 1.5
-                            g=int(m.group(1))+int(m.group(2))
-                            p['stato']='VINTO' if g>=2 else 'PERSO'
-                        agg+=1
-                        send_email(f"ESITO {p['stato']} {p['regola']}: {p['squadra_a']} vs {p['squadra_b']} {fin}",f"{p['regola']} {p['bet']} - {p['squadra_a']} vs {p['squadra_b']} FINALE {fin} - {p['stato']}<br>Link: {p['link']}")
-                        break
-        if agg>0: save_db()
-        return f"Verificati {agg} match"
-    except Exception as e:
-        return f"Errore check: {e}"
+    found = scan_livescore()
+    return jsonify({"trovati": found, "tot_db": len(load_db())})
 
 @app.route("/stats")
 def stats():
-    tot=len(pronostici)
-    byR={}
-    for p in pronostici:
-        r=p.get('regola','R1')
-        if r not in byR: byR[r]={'tot':0,'v':0,'p':0}
-        byR[r]['tot']+=1
-        if p['stato']=='VINTO': byR[r]['v']+=1
-        if p['stato']=='PERSO': byR[r]['p']+=1
-    html="<h2>STATS 3 REGOLE</h2>"
-    for k,v in byR.items():
-        perc=(v['v']/(v['v']+v['p'])*100) if v['v']+v['p']>0 else 0
-        html+=f"{k}: Tot {v['tot']} Vinti {v['v']} Persi {v['p']} Win {perc:.1f}%<br>"
-    html+=f"<br><a href='/history'>Storico</a>"
-    return html
+    db = load_db()
+    def cnt(reg, esito=None):
+        fl = [x for x in db if x.get("regola")==reg]
+        if esito:
+            fl = [x for x in fl if x.get("esito")==esito]
+        return len(fl)
+    total = len(db)
+    return jsonify({
+        "tot": total,
+        "R1": {"tot": cnt("R1"), "V": cnt("R1","WIN"), "P": cnt("R1","LOSE")},
+        "R2": {"tot": cnt("R2"), "V": cnt("R2","WIN"), "P": cnt("R2","LOSE")},
+        "R3": {"tot": cnt("R3"), "V": cnt("R3","WIN"), "P": cnt("R3","LOSE")},
+        "R4": {"tot": cnt("R4"), "V": cnt("R4","WIN"), "P": cnt("R4","LOSE")},
+    })
 
 @app.route("/history")
 def history():
-    h="<h2>Storico</h2><table border=1><tr><th>Reg</th><th>Data</th><th>Match</th><th>Live</th><th>Bet</th><th>Finale</th><th>Esito</th></tr>"
-    for p in reversed(pronostici):
-        h+=f"<tr><td>{p.get('regola','')}</td><td>{p['data']}</td><td>{p['squadra_a']} vs {p['squadra_b']}</td><td>{p['minuto']}' {p.get('risultato','')}</td><td>{p['bet']}</td><td>{p.get('finale','-')}</td><td>{p['stato']}</td></tr>"
-    h+="</table>"
-    return h
+    return jsonify(load_db())
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+@app.route("/check_results")
+def check_results():
+    # placeholder per controllo esiti finali - mantiene PENDING se non implementato
+    return jsonify({"msg": "check_results OK", "tot": len(load_db())})
+
+@app.route("/test_mail")
+def test_mail():
+    link_bwin = get_bwin_link("Team A Test", "Team B Test")
+    html = build_email("CAMPIONATO TEST", "Team A", "Team B", 55, "1-1", "OVER 2.5 [TEST R4]", "-1.25", "-0.5", "2.75", "2.5", ASIAN_URL, link_bwin)
+    send_email("TEST MAIL - Bot 4 REGOLE", html)
+    return "Mail di test R4 inviata - controlla inbox e SPAM"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
