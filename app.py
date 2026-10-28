@@ -5,12 +5,14 @@ import pytz
 
 app = Flask(__name__)
 
-BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 FROM_EMAIL = "paolo.zapp82@gmail.com"
 TO_EMAIL = "paolo.zapp82@yahoo.com"
 TZ = pytz.timezone("Europe/Rome")
 
 def invia_mail_brevo(oggetto, testo):
+    BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+    if not BREVO_API_KEY:
+        return "ERRORE: Manca BREVO_API_KEY su Render Environment"
     url = "https://api.brevo.com/v3/smtp/email"
     headers = {"api-key": BREVO_API_KEY, "Content-Type": "application/json", "accept": "application/json"}
     data = {
@@ -24,12 +26,12 @@ def invia_mail_brevo(oggetto, testo):
 
 @app.route("/")
 def home():
-    return f'BOT LIVE<br><a href="/test">TEST MAIL YAHOO</a>'
+    return f'BOT SICURO<br><a href="/test">CLICCA QUI PER TEST YAHOO</a>'
 
 @app.route("/test")
 def test():
-    ris = invia_mail_brevo("TEST FINALE BOT PAOLO", f"Test ore {datetime.now(TZ)} - Se leggi su Yahoo funziona!")
-    return f"Risultato: {ris}<br>Controlla Yahoo!"
+    ris = invia_mail_brevo("TEST FINALE BOT PAOLO - CHIAVE NUOVA", f"Test ore {datetime.now(TZ)}")
+    return f"Risultato: {ris}<br><br>Se vedi 201, controlla Yahoo!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
