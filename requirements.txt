@@ -1,5 +1,4 @@
-flask
+Flask==2.3.3
 requests
-beautifulsoup4
-lxml
+pytz
 gunicorn
