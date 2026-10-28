@@ -8,7 +8,8 @@ app = Flask(__name__)
 DB="db.json"
 TO="paolo.zapp82@yahoo.com"
 U="https://www.asianbetsoccer.com/livescore.html"
-H={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0","Referer":"https://www.google.com/"}
+BASE="https://www.asianbetsoccer.com"
+H={"User-Agent":"Mozilla/5.0 Chrome/124.0","Referer":BASE+"/"}
 KEY=os.environ.get("BREVO_KEY","")
 
 def L():
@@ -33,42 +34,56 @@ def MAIL(sub,html):
     except: return False
 
 def F():
-    for url in [U,f"https://api.allorigins.win/raw?url={U}",f"https://corsproxy.io/?{U}"]:
+    # 1) scarica pagina base
+    try: html=requests.get(U,headers=H,timeout=20).text
+    except: return ""
+    combined=html
+    soup=BS(html,"html.parser")
+    # 2) cerca tutti i js che sembrano dati live e scaricali anche
+    for script in soup.find_all("script",src=True):
+        src=script["src"]
+        if any(k in src.lower() for k in ["live","score","odd","data","match"]):
+            if src.startswith("/"): src=BASE+src
+            elif not src.startswith("http"): src=BASE+"/"+src
+            try:
+                js=requests.get(src,headers=H,timeout=15).text
+                if len(js)>1000: combined+="\n"+js
+            except: pass
+    # prova anche file comuni di asianbetsoccer
+    for extra in ["/js/livescore.js","/js/data.js","/livescore_data.js","/data/live.js"]:
         try:
-            t=requests.get(url,headers=H,timeout=20).text
-            if len(t)>8000: return t
+            js=requests.get(BASE+extra,headers=H,timeout=10).text
+            if len(js)>2000: combined+="\n"+js
         except: pass
-    return ""
+    return combined
 
 @app.route("/")
-def home(): return f"ON R1-R5 40-75 Tot:{len(L())} {DT.now().strftime('%H:%M')} len:{len(F())}"
+def home(): return f"ON R1-R5 40-75 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
 
 @app.route("/debug")
 def dbg():
     h=F()
-    return jsonify({"len":len(h),"ok":len(h)>5000,"snippet":h[:2000]})
+    # mostra un pezzo dove ci sono risultati
+    m=re.findall(r"\d+\s*-\s*\d+",h)
+    return jsonify({"len":len(h),"ok":len(h)>5000,"scores_found":len(m),"snippet":h[3000:6000]})
 
 @app.route("/live")
 def live():
     h=F()
     if not h: return jsonify({"count":0,"len":0,"err":"no html"})
-    # nuovo parser tollerante - cerca ovunque il minuto e il risultato
     soup=BS(h,"html.parser")
     out=[]
-    text = soup.get_text("\n", strip=True)
-    lines = text.split("\n")
-    for line in lines:
-        # cerca linee tipo "45 [0-0]" o "72' 1-1" o simili
-        if re.search(r"\d+", line) and re.search(r"\d+\s*-\s*\d+", line):
-            if len(line) < 200 and len(line) > 5:
-                out.append(line[:180])
-    # fallback se ancora vuoto, prendi tutti i tr
-    if not out:
-        for tr in soup.find_all("tr"):
-            txt = tr.get_text(" ", strip=True)
-            if re.search(r"\d+\s*-\s*\d+", txt):
-                out.append(txt[:180])
-    return jsonify({"live":out[:60],"count":len(out),"len":len(h)})
+    # cerca ovunque pattern tipo "TeamA 1-0 TeamB 45'"
+    for tr in soup.find_all("tr"):
+        txt=tr.get_text(" ",strip=True)
+        if re.search(r"\d+\s*-\s*\d+",txt) and len(txt)<250:
+            out.append(txt[:200])
+    if len(out)<5:
+        # fallback regex su tutto il file combinato
+        for line in h.split("\n"):
+            if re.search(r"\d+\s*-\s*\d+",line) and len(line)<300 and "Asian" not in line:
+                out.append(line.strip()[:200])
+    return jsonify({"live":out[:80],"count":len(out),"len":len(h)})
 
 @app.route("/scan")
 def scan():
@@ -80,12 +95,10 @@ def scan():
         for tr in soup.find_all("tr"):
             tds=tr.find_all("td")
             if len(tds)<3: continue
-            txt=tr.get_text(" ", strip=True)
-            mm=re.search(r"(\d+)\s*\[",txt)
-            mr=re.search(r"(\d+)\s*-\s*(\d+)",txt)
+            txt=tr.get_text(" ",strip=True)
+            mm=re.search(r"(\d+)\s*\[",txt); mr=re.search(r"(\d+)\s*-\s*(\d+)",txt)
             if mm and mr:
-                last_m=int(mm.group(1))
-                last_ris=f"{mr.group(1)}-{mr.group(2)}"
+                last_m=int(mm.group(1)); last_ris=f"{mr.group(1)}-{mr.group(2)}"
             cols=[td.get_text(" ",strip=True) for td in tds]
             if len(cols)>=2:
                 last_a=cols[0][:30];last_b=cols[1][:30]
