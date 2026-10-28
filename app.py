@@ -2,13 +2,15 @@ import os,json,re,requests
 from flask import Flask,jsonify
 from bs4 import BeautifulSoup as BS
 from datetime import datetime as DT
+
 app=Flask(__name__)
 DB="/tmp/pronostici.json"
 KEY=os.environ.get("BREVO_API_KEY","")
 SND=os.environ.get("SENDER_EMAIL","paolo.zapp82@yahoo.com")
 TO="paolo.zapp82@yahoo.com"
 U="https://www.asianbetsoccer.com/livescore.html"
-H={"User-Agent":"Mozilla/5.0 Chrome/124.0","Referer":U}
+H={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0","Referer":U,"Accept":"text/html,application/xhtml+xml"}
+
 def L():
  try:return json.load(open(DB)) if os.path.exists(DB) else []
  except:return[]
@@ -16,12 +18,12 @@ def S(d):
  try:json.dump(d,open(DB,"w"),ensure_ascii=False,indent=2)
  except:pass
 def PF(s):
- m=re.search(r"[+-]?\d+(?:\.\d+)?",str(s).replace("−","-"))
+ m=re.search(r"[+-]?\d+(?:\.\d+)?",str(s).replace("−","-").replace("–","-"))
  return float(m.group()) if m else None
 def RED(td):
  if not td:return False
  h=str(td).lower()
- return "red" in h or "ff0000" in h or "color:red" in h
+ return "red" in h or "ff0000" in h or "color:red" in h or 'style="color:red"' in h
 def MAIL(sub,html):
  try:
   r=requests.post("https://api.brevo.com/v3/smtp/email",headers={"api-key":KEY,"Content-Type":"application/json"},json={"sender":{"email":SND},"to":[{"email":TO}],"subject":sub,"htmlContent":html},timeout=20)
@@ -30,27 +32,47 @@ def MAIL(sub,html):
 def F():
  for url in [U,f"https://api.allorigins.win/raw?url={U}",f"https://corsproxy.io/?{U}"]:
   try:
-   t=requests.get(url,headers=H,timeout=20).text
-   if len(t)>8000:return t
+   t=requests.get(url,headers=H,timeout=25).text
+   if len(t)>8000 and "livescore" in t.lower():return t
   except:pass
- return""
+ return ""
+
 @app.route("/")
-def home():return f"ON R1-R5 49-75 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
+def home():
+ return f"ON R1-R5 49-75 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
+
 @app.route("/debug")
-def dbg():h=F();return jsonify({"len":len(h),"ok":len(h)>5000})
+def dbg():
+ h=F()
+ return jsonify({"len":len(h),"ok":len(h)>5000})
+
 @app.route("/live")
 def live():
- h=F();soup=BS(h,"html.parser");out=[]
+ h=F()
+ raw_mins=re.findall(r"(\d{1,3})\s*['’´′]",h)
+ soup=BS(h,"html.parser")
+ out=[]
  for tr in soup.find_all("tr"):
   txt=tr.get_text(" ",strip=True)
-  mm=re.search(r"(\d+)\s*['′]",txt)
-  if not mm:continue
-  out.append(txt[:180])
- return jsonify({"live":out[:40],"count":len(out),"len":len(h)})
+  if re.search(r"\d+\s*-\s*\d+",txt) and re.search(r"\d+\s*['’´′]",txt):
+   out.append(txt[:200])
+ if len(out)==0 and len(h)>0:
+  # fallback raw split
+  for chunk in h.split("<tr")[:200]:
+   if re.search(r"\d+\s*-\s*\d+",chunk) and re.search(r"\d+\s*['’´′]",chunk):
+    out.append(BS(chunk,"html.parser").get_text(" ",strip=True)[:200])
+    if len(out)>=50:break
+ return jsonify({"count":len(out),"len":len(h),"raw_minutes":raw_mins[:15],"live":out[:50]})
+
 @app.route("/reset")
-def reset():S([]);return jsonify({"reset":True})
+def reset():
+ S([])
+ return jsonify({"reset":True})
+
 @app.route("/stats")
-def stats():return jsonify(L())
+def stats():
+ return jsonify(L())
+
 @app.route("/scan")
 def scan():
  try:
@@ -62,11 +84,15 @@ def scan():
    tds=tr.find_all("td")
    if len(tds)<3:continue
    txt=tr.get_text(" ",strip=True)
-   mm=re.search(r"(\d+)\s*['′]",txt);mr=re.search(r"(\d+)\s*-\s*(\d+)",txt)
+   mm=re.search(r"(\d+)\s*['’´′]",txt)
+   mr=re.search(r"(\d+)\s*-\s*(\d+)",txt)
    if mm and mr:
-    last_m=int(mm.group(1));last_ris=f"{mr.group(1)}-{mr.group(2)}"
+    last_m=int(mm.group(1))
+    last_ris=f"{mr.group(1)}-{mr.group(2)}"
     cols=[td.get_text(" ",strip=True) for td in tds]
-    if len(cols)>=2:last_a=cols[0][:30];last_b=cols[1][:30]
+    if len(cols)>=2:
+     last_a=cols[0][:30]
+     last_b=cols[1][:30] if len(cols)>1 else "B"
     continue
    if not(49<=last_m<=75):continue
    cols=[td.get_text(" ",strip=True) for td in tds]
@@ -81,20 +107,32 @@ def scan():
    if scu is None:continue
    mid=f"{last_a}-{last_b}-{last_m}-{last_ris}-{scu_r}".replace(" ","_")
    if any(x.get("id")==mid for x in db):continue
-   bet=reg=None;cond=(scu>0 and scu>sop) or (scu<0 and scu<sop)
-   if last_ris=="0-1" and scu!=sop and red:bet="OVER 1.5";reg="R5"
-   elif last_ris=="0-0" and cond:bet="OVER 0.5";reg="R1"
-   elif last_ris=="1-0" and abs(scu)>=0.75 and cond:bet="OVER 1.5";reg="R2"
-   elif last_ris=="0-1" and abs(scu)>=0.75 and cond:bet="OVER 1.5";reg="R3"
-   elif last_ris=="1-1" and abs(scu)>=1 and cond:bet="OVER 2.5";reg="R4"
+   bet=reg=None
+   cond=(scu>0 and scu>sop) or (scu<0 and scu<sop)
+   if last_ris=="0-1" and scu!=sop and red:
+    bet="OVER 1.5";reg="R5"
+   elif last_ris=="0-0" and cond:
+    bet="OVER 0.5";reg="R1"
+   elif last_ris=="1-0" and abs(scu)>=0.75 and cond:
+    bet="OVER 1.5";reg="R2"
+   elif last_ris=="0-1" and abs(scu)>=0.75 and cond:
+    bet="OVER 1.5";reg="R3"
+   elif last_ris=="1-1" and abs(scu)>=1 and cond:
+    bet="OVER 2.5";reg="R4"
    if bet:
-    ok=MAIL(f"[{reg}] {last_a} vs {last_b} {last_ris} {last_m}' {bet}",f"{last_a} vs {last_b} {last_m}' {last_ris} {bet} CU:{scu_r} OP:{sop_r}")
+    ok=MAIL(f"[{reg}] {last_a} vs {last_b} {last_ris} {last_m}' {bet}",f"{last_a} vs {last_b} {last_m}' {last_ris} {bet}<br>CU:{scu_r} OP:{sop_r}")
     if ok:
-     db.append({"id":mid,"ora":DT.now().strftime("%H:%M"),"a":last_a,"b":last_b,"m":last_m,"ris":last_ris,"bet":bet,"reg":reg})
-     fnd.append(f"{reg} {last_a}-{last_b} {last_ris} {last_m}'")
-  S(db);return jsonify({"trovati":fnd,"tot":len(db),"range":"49-75"})
- except Exception as e:return jsonify({"error":str(e),"trovati":[]})
+     db.append({"id":mid,"ora":DT.now().strftime("%H:%M"),"a":last_a,"b":last_b,"m":last_m,"ris":last_ris,"bet":bet,"reg":reg,"cu":scu_r,"op":sop_r})
+     fnd.append(f"{reg} {last_a}-{last_b} {last_ris} {last_m}' {bet}")
+  S(db)
+  return jsonify({"trovati":fnd,"tot":len(db),"range":"49-75"})
+ except Exception as e:
+  return jsonify({"error":str(e),"trovati":[]})
+
 @app.route("/test_all")
 def tall():
- r1=MAIL("[R1] TEST","TEST");return jsonify({"sent":r1})
-if __name__=="__main__":app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+ ok=MAIL("[TEST] Bot Asian OK","[TEST] Bot funziona")
+ return jsonify({"sent":ok})
+
+if __name__=="__main__":
+ app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
