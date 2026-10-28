@@ -1,3 +1,5 @@
+ora ci vado a mettere per la centesima volta questo ok? 
+
 import os,json,re,requests,urllib.parse
 from flask import Flask,jsonify
 from bs4 import BeautifulSoup as BS
