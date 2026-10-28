@@ -9,7 +9,7 @@ DB='db.json'
 TO='paolo.zapp82@yahoo.com'
 U='https://www.asianbetsoccer.com/livescore.html'
 BASE='https://www.asianbetsoccer.com'
-H={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0','Referer':'https://www.google.com/'}
+H={'User-Agent':'Mozilla/5.0 Chrome/124.0','Referer':'https://www.google.com/'}
 KEY=os.environ.get('BREVO_KEY','')
 
 def L():
@@ -24,45 +24,36 @@ def PF(s):
 def RED(td):
     if not td: return False
     h=str(td).lower()
-    return 'red' in h or 'ff0000' in h or 'color:red' in h
+    return 'red' in h or 'ff0000' in h
 def MAIL(sub,html):
     try:
         r=requests.post('https://api.brevo.com/v3/smtp/email',
         headers={'api-key':KEY,'Content-Type':'application/json'},
-        json={'sender':{'email':'bot@asianbot.com'},'to':[{'email':TO}],'subject':sub,'htmlContent':html},timeout=15)
+        json={'sender':{'email':'bot@asianbot.com'},'to':[{'email':TO}],'subject':sub,'htmlContent':html},timeout=12)
         return r.status_code<400
     except: return False
 
 def GET(url):
-    # prova 3 modi diversi per bypassare blocco Oregon
-    for u in [url, f'https://api.allorigins.win/raw?url={url}', f'https://corsproxy.io/?{url}', f'https://api.codetabs.com/v1/proxy?quest={url}']:
+    # solo 2 proxy veloci, timeout corto 8s
+    urls=[f'https://api.allorigins.win/raw?url={url}', url, f'https://corsproxy.io/?{url}']
+    for u in urls:
         try:
-            t=requests.get(u,headers=H,timeout=20).text
+            t=requests.get(u,headers=H,timeout=8).text
             if len(t)>2000: return t
         except: pass
     return ''
 
 def F():
-    html=GET(U)
-    if len(html)<2000: return html
-    combined=html
-    soup=BS(html,'html.parser')
-    for script in soup.find_all('script',src=True):
-        src=script['src']
-        if src.startswith('/'): src=BASE+src
-        elif not src.startswith('http'): src=BASE+'/'+src
-        if any(k in src.lower() for k in ['live','score','odd','data']):
-            js=GET(src)
-            if len(js)>1000: combined+='\n'+js
-    return combined
+    return GET(U)
 
 @app.route('/')
-def home(): return f"ON R1-R5 40-75 Tot:{len(L())} {DT.now().strftime('%H:%M')} len:{len(F())}"
+def home(): 
+    return f"ON R1-R5 40-75 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
 
 @app.route('/debug')
 def dbg():
     h=F()
-    return jsonify({'len':len(h),'ok':len(h)>5000,'scores_found':len(re.findall(r'\d+\s*-\s*\d+',h)),'snippet':h[2000:5000]})
+    return jsonify({'len':len(h),'ok':len(h)>5000,'scores':len(re.findall(r'\d+\s*-\s*\d+',h)),'first500':h[:500]})
 
 @app.route('/live')
 def live():
@@ -112,24 +103,4 @@ def scan():
             elif last_ris=='0-0' and cond: bet='OVER 0.5';reg='R1'
             elif last_ris=='1-0' and abs(scu)>0.75 and cond: bet='OVER 1.5';reg='R2'
             elif last_ris=='0-1' and abs(scu)>0.75 and cond: bet='OVER 1.5';reg='R3'
-            elif last_ris=='1-1' and abs(scu)==1 and cond: bet='OVER 2.5';reg='R4'
-            if bet:
-                subj=f"[{reg}] {last_a} vs {last_b} ({last_ris}) {bet} {last_m}'"
-                html=f"{last_a} vs {last_b} {last_m}' {last_ris} {bet}<br>{scu_r} red={red}"
-                if MAIL(subj,html):
-                    db.append({'id':mid,'ora':DT.now().strftime('%H:%M'),'a':last_a,'b':last_b,'m':last_m,'ris':last_ris,'bet':bet,'reg':reg})
-                    fnd.append({'reg':reg,'match':f"{last_a} vs {last_b}",'bet':bet})
-        S(db)
-        return jsonify({'trovati':fnd,'tot':len(db),'len':len(h)})
-    except Exception as e:
-        return jsonify({'error':str(e),'trovati':[]})
-
-@app.route('/reset')
-def reset(): S([]); return jsonify({'reset':True})
-@app.route('/stats')
-def stats(): return jsonify(L())
-@app.route('/test_mail')
-def test_mail(): return jsonify({'sent':MAIL('[TEST] Bot OK','Test riuscito')})
-
-if __name__=='__main__':
-    app.run(host='0.0.0.0',port=int(os.environ.get('PORT',10000)))
+            elif last_ris=='1-1
