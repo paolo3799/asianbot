@@ -4,72 +4,33 @@ from datetime import datetime
 import pytz
 
 app = Flask(__name__)
-
 EMAIL = "paolo.zapp82@gmail.com"
 TZ = pytz.timezone("Europe/Rome")
 
 def send_email(subject, message):
     try:
         url = f"https://formsubmit.co/ajax/{EMAIL}"
-        data = {
-            "subject": subject,
-            "_subject": subject,
-            "message": message,
-            "_template": "table",
-            "_captcha": "false"
-        }
-        r = requests.post(url, data=data, timeout=15)
-        print(f"EMAIL {r.status_code}: {r.text[:200]}")
+        data = {"_subject": subject, "subject": subject, "message": message, "_template": "table", "_captcha": "false"}
+        r = requests.post(url, data=data, timeout=20)
+        print(f"MAIL {r.status_code}")
         return True
     except Exception as e:
-        print(f"Errore email: {e}")
+        print(f"Errore: {e}")
         return False
 
-def log(msg):
-    print(f"[{datetime.now(TZ).strftime('%H:%M:%S')}] {msg}")
-
-def check_matches():
-    while True:
-        try:
-            log("Controllo partite...")
-        except Exception as e:
-            log(f"Errore: {e}")
-        time.sleep(180)
-
-threading.Thread(target=check_matches, daemon=True).start()
+threading.Thread(target=lambda: time.sleep(1), daemon=True).start()
 
 @app.route("/")
 def home():
-    return f"""
-    <h2>BOT LIVE - PAOLO</h2>
-    Email: {EMAIL}<br>
-    Ora: {datetime.now(TZ)}<br><br>
-    <a href='/test'>CLICCA QUI PER TEST MAIL</a><br>
-    """
+    return f'<h2>BOT LIVE - EMAIL</h2>Email: {EMAIL}<br>Ora: {datetime.now(TZ)}<br><br><a href="/test">CLICCA QUI PER TEST MAIL</a>'
 
 @app.route("/test")
 def test():
     ok = send_email(
-        subject="✅ TEST BOT ATTIVO - OVER 0.5",
-        message=f"""Ciao Paolo,
-
-Questo è il test del tuo bot asianbet.
-
-Se leggi questa mail, funziona!
-
-Bot: https://asianbot-ku6n.onrender.com
-Ora test: {datetime.now(TZ)}
-
-Prossime notifiche reali:
-OVER 0.5 50-60' 0-0 con CU/OP filtrati
-
-- Il tuo Bot Caorle
-"""
+        "✅ TEST BOT PAOLO",
+        f"Ciao Paolo! Test bot funzionante!\nOra: {datetime.now(TZ)}\nBot: https://asianbot-ku6n.onrender.com\nSe leggi questa, la mail va!"
     )
-    if ok:
-        return f"Test inviato a {EMAIL}!<br>Controlla posta e SPAM. Se è la prima volta, cerca mail da FormSubmit e clicca ACTIVATE poi rifai /test."
-    else:
-        return "Errore invio"
+    return f"Test inviato a {EMAIL}!<br>Controlla posta e SPAM. Se è prima volta, apri mail FormSubmit e clicca ACTIVATE poi rifai /test."
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
