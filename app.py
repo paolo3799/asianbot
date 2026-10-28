@@ -20,7 +20,7 @@ def PF(s):
  return float(m.group()) if m else None
 def RED(td):
  h=str(td).lower()
- return "red" in h or "ff0000" in h or "#f00" in h
+ return "red" in h or "ff0000" in h or "#f00" in h or "background:#f" in h or "background-color:red" in h
 def MAIL(sub,html):
  try:
   r=requests.post("https://api.brevo.com/v3/smtp/email",headers={"api-key":KEY,"Content-Type":"application/json"},json={"sender":{"email":SND},"to":[{"email":TO}],"subject":sub,"htmlContent":html},timeout=15)
@@ -34,14 +34,14 @@ def F():
   except:pass
  return""
 @app.route("/")
-def home():return f"ON R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
+def home():return f"ON R1-R5 49-65 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
 @app.route("/debug")
-def dbg():h=F();return jsonify({"len":len(h),"ok":len(h)>5000})
+def dbg():h=F();return jsonify({"len":len(h),"ok":len(h)>5000,"url":U})
 @app.route("/scan")
 def scan():
  try:
   db=L();fnd=[];h=F()
-  if not h:return jsonify({"trovati":[],"tot":len(db)})
+  if not h:return jsonify({"trovati":[],"tot":len(db),"err":"no html"})
   soup=BS(h,"html.parser")
   for tr in soup.find_all("tr"):
    tds=tr.find_all("td")
@@ -50,7 +50,7 @@ def scan():
    mm=re.search(r"(\d+)\s*['′]",txt)
    if not mm:continue
    m=int(mm.group(1))
-   if not(m==50 or 50<=m<=60):continue
+   if not(49<=m<=65):continue
    mr=re.search(r"(\d+)\s*-\s*(\d+)",txt)
    if not mr:continue
    ris=f"{mr.group(1)}-{mr.group(2)}"
@@ -69,21 +69,27 @@ def scan():
    mid=f"{a}-{b}-{m}-{ris}-{scu_r}".replace(" ","_")
    if any(x.get("id")==mid for x in db):continue
    bet=reg=None;cond=(scu>0 and scu>sop) or (scu<0 and scu<sop)
-   if m==50 and ris=="0-1" and scu!=sop and red:bet="OVER 1.5";reg="R5"
+   if 49<=m<=65 and ris=="0-1" and scu!=sop and red:bet="OVER 1.5";reg="R5"
    elif ris=="0-0" and cond:bet="OVER 0.5";reg="R1"
    elif ris=="1-0" and abs(scu)>=0.75 and cond:bet="OVER 1.5";reg="R2"
    elif ris=="0-1" and abs(scu)>=0.75 and cond:bet="OVER 1.5";reg="R3"
    elif ris=="1-1" and abs(scu)>=1 and cond:bet="OVER 2.5";reg="R4"
    if bet:
-    MAIL(f"[{reg}] {a} vs {b} {ris} {m}' {bet}",f"{camp}<br>{a} vs {b} {m}' {ris} {bet}<br>CU:{scu_r} OP:{sop_r} RED:{red}")
+    MAIL(f"[{reg}] {a} vs {b} {ris} {m}' {bet}",f"{camp}<br>{a} vs {b} {m}' {ris} {bet}<br>CU:{scu_r} OP:{sop_r} RED:{red}<br>BWIN/188Bet OK")
     db.append({"id":mid,"ora":DT.now().strftime("%H:%M"),"a":a,"b":b,"m":m,"ris":ris,"bet":bet,"reg":reg})
     fnd.append(mid)
-  S(db);return jsonify({"trovati":fnd,"tot":len(db),"r5":True})
+  S(db);return jsonify({"trovati":fnd,"tot":len(db),"range":"49-65","r5":True})
  except Exception as e:return jsonify({"error":str(e),"trovati":[]})
 @app.route("/stats")
 def stats():return jsonify(L())
 @app.route("/test_r5")
-def t5():ok=MAIL("[R5] TEST 0-1 50' RED","Turkey TEST 0-1 50' SPREAD ROSSO");return jsonify({"sent":ok})
+def t5():ok=MAIL("[R5] TEST 0-1 49-65 RED","Turkey TEST 0-1 49-65 SPREAD ROSSO - 188Bet/BWIN");return jsonify({"sent":ok,"reg":"R5","range":"49-65"})
 @app.route("/test_r3")
-def t3():ok=MAIL("[R3] TEST 0-1 56'","TEST R3");return jsonify({"sent":ok})
+def t3():ok=MAIL("[R3] TEST 0-1 49-65","TEST R3 OVER 1.5");return jsonify({"sent":ok,"reg":"R3"})
+@app.route("/test_all")
+def tall():
+ r1=MAIL("[R1] TEST 0-0","TEST R1")
+ r3=MAIL("[R3] TEST 0-1","TEST R3")
+ r5=MAIL("[R5] TEST 0-1 RED","TEST R5")
+ return jsonify({"r1":r1,"r3":r3,"r5":r5,"all_sent":r1 and r3 and r5})
 if __name__=="__main__":app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
