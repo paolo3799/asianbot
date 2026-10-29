@@ -33,43 +33,49 @@ def GET(url):
     proxies = [
         f'https://api.allorigins.win/raw?url={url}',
         f'https://corsproxy.io/?{url}',
-        f'https://api.codetabs.com/v1/proxy?quest={url}',
-        url
     ]
     for p in proxies:
         try:
-            t = requests.get(p, headers={'User-Agent':'Mozilla/5.0 Chrome/124'}, timeout=9).text
-            if len(t) > 2000:  # se supera 2000 non è il blocco da 181
+            t = requests.get(p, headers={'User-Agent':'Mozilla/5.0 Chrome/124'}, timeout=6).text
+            if len(t) > 2000:
                 return t
         except: pass
-    return ''
+    try:
+        return requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=5).text
+    except: return ''
 
 def F(): return GET(U)
 
 @app.route('/')
-def home(): return f"ON V8 R1-R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
+def home(): return f"ON V9 R1-R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
 
 @app.route('/debug')
 def dbg():
-    h=F()
-    return jsonify({'len':len(h),'ok':len(h)>2000,'first':h[:200]})
+    try:
+        h=F()
+        return jsonify({'len':len(h),'ok':len(h)>2000,'first':h[:250]})
+    except Exception as e:
+        return jsonify({'len':0,'ok':False,'err':str(e)})
 
 @app.route('/live')
 def live():
-    h=F()
-    if len(h)<800: return jsonify({'count':0,'len':len(h),'err':'bloccato'})
-    soup=BS(h,'html.parser')
-    out=[]
-    for tr in soup.find_all('tr'):
-        txt=tr.get_text(' ',strip=True)
-        if re.search(r'\d+\s*-\s*\d+',txt) and 10<len(txt)<250:
-            out.append(txt[:180])
-    return jsonify({'count':len(out),'len':len(h),'live':out[:60]})
+    try:
+        h=F()
+        if len(h)<800: return jsonify({'count':0,'len':len(h),'err':'bloccato'})
+        soup=BS(h,'html.parser')
+        out=[]
+        for tr in soup.find_all('tr'):
+            txt=tr.get_text(' ',strip=True)
+            if re.search(r'\d+\s*-\s*\d+',txt) and 10<len(txt)<250:
+                out.append(txt[:180])
+        return jsonify({'count':len(out),'len':len(h),'live':out[:60]})
+    except Exception as e:
+        return jsonify({'count':0,'err':str(e)})
 
 @app.route('/scan')
 def scan():
     db=L(); fnd=[]; h=F()
-    if len(h)<800: return jsonify({'trovati':[],'tot':len(db),'len':len(h),'err':'bloccato Oregon - riprovo'})
+    if len(h)<800: return jsonify({'trovati':[],'tot':len(db),'len':len(h),'err':'bloccato - riprovo'})
     soup=BS(h,'html.parser')
     last_a='A'; last_b='B'; last_m=0; last_ris=''
     for tr in soup.find_all('tr'):
@@ -114,7 +120,7 @@ def reset(): S([]); return jsonify({'reset':True})
 @app.route('/stats')
 def stats(): return jsonify(L())
 @app.route('/test_mail')
-def test_mail(): return jsonify({'sent':MAIL('[TEST V8]','ok')})
+def test_mail(): return jsonify({'sent':MAIL('[TEST V9]','ok')})
 
 if __name__=='__main__':
     app.run(host='0.0.0.0',port=int(os.environ.get('PORT',10000)))
