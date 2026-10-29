@@ -29,51 +29,72 @@ def MAIL(sub,html):
         return r.status_code<400
     except: return False
 
-# V11: 1 solo proxy velocissimo
 def GET(url):
-    try:
-        # proxy piu veloce, 4 sec max
-        p=f'https://api.codetabs.com/v1/proxy?quest={url}'
-        t=requests.get(p, headers={'User-Agent':'Mozilla/5.0'}, timeout=5).text
-        if len(t)>2000 and 'sgcaptcha' not in t:
-            return t
-    except: pass
-    try:
-        p2=f'https://api.allorigins.win/raw?url={url}'
-        t=requests.get(p2, headers={'User-Agent':'Mozilla/5.0'}, timeout=5).text
-        return t
-    except: return ''
+    proxies=[
+        f'https://thingproxy.freeboard.io/fetch/{url}',
+        f'https://corsproxy.io/?{url}',
+        f'https://api.allorigins.win/raw?url={url}',
+        f'https://api.allorigins.win/get?url={url}',
+    ]
+    for p in proxies:
+        try:
+            r=requests.get(p, headers={'User-Agent':'Mozilla/5.0 Chrome/124'}, timeout=6)
+            t=r.text
+            if '"contents"' in t: # per /get
+                try: t=json.loads(t).get('contents','')
+                except: pass
+            if len(t)>2000 and 'sgcaptcha' not in t.lower():
+                return t
+        except: pass
+    return ''
 
 def F(): return GET(U)
 
 @app.route('/')
-def home(): return f"ON V11 R1-R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
+def home(): return f"ON V12 R1-R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
 
 @app.route('/debug')
 def dbg():
-    try:
-        h=F()
-        # ritorna subito, non cicla
-        return jsonify({'len':len(h),'ok':len(h)>2000,'captcha':'sgcaptcha' in h,'first':h[:300]})
-    except Exception as e:
-        return jsonify({'len':0,'ok':False,'err':str(e)})
+    logs=[]
+    url=U
+    proxies=[
+        f'https://thingproxy.freeboard.io/fetch/{url}',
+        f'https://corsproxy.io/?{url}',
+        f'https://api.allorigins.win/raw?url={url}',
+    ]
+    final_len=0
+    final_ok=False
+    for p in proxies:
+        try:
+            r=requests.get(p, headers={'User-Agent':'Mozilla/5.0'}, timeout=7)
+            t=r.text
+            ok=len(t)>2000 and 'sgcaptcha' not in t.lower()
+            logs.append({'proxy':p.split('/')[2][:20],'len':len(t),'ok':ok})
+            if ok:
+                final_len=len(t)
+                final_ok=True
+                return jsonify({'len':final_len,'ok':True,'first':t[:300],'logs':logs})
+        except Exception as e:
+            logs.append({'proxy':p[:30],'err':str(e)[:80]})
+    h=F()
+    return jsonify({'len':len(h),'ok':len(h)>2000,'first':h[:300],'logs':logs})
 
 @app.route('/live')
 def live():
     h=F()
-    if len(h)<800: return jsonify({'count':0,'len':len(h),'err':'bloccato 181 - sucuri'})
+    if len(h)<800: return jsonify({'count':0,'len':len(h),'err':'bloccato'})
     soup=BS(h,'html.parser')
     out=[]
     for tr in soup.find_all('tr'):
         txt=tr.get_text(' ',strip=True)
         if re.search(r'\d+\s*-\s*\d+',txt) and 10<len(txt)<250:
             out.append(txt[:180])
-    return jsonify({'count':len(out),'len':len(h),'live':out[:30]})
+    return jsonify({'count':len(out),'len':len(h),'live':out[:40]})
 
 @app.route('/scan')
 def scan():
     db=L(); fnd=[]; h=F()
-    if len(h)<800: return jsonify({'trovati':[],'tot':len(db),'len':len(h),'err':'bloccato 181'})
+    if len(h)<800: return jsonify({'trovati':[],'tot':len(db),'len':len(h),'err':'bloccato'})
     soup=BS(h,'html.parser')
     last_a='A'; last_b='B'; last_m=0; last_ris=''
     for tr in soup.find_all('tr'):
