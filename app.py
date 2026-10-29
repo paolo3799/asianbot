@@ -29,79 +29,51 @@ def MAIL(sub,html):
         return r.status_code<400
     except: return False
 
+# V11: 1 solo proxy velocissimo
 def GET(url):
-    proxies = [
-        f'https://api.codetabs.com/v1/proxy?quest={url}',
-        f'https://thingproxy.freeboard.io/fetch/{url}',
-        f'https://api.allorigins.win/raw?url={url}',
-        f'https://corsproxy.io/?{url}',
-        f'https://api.allorigins.win/get?url={url}', # questo ritorna json
-        f'https://cc.bingj.com/cache.aspx?d=463-2-2822&u={url}&w=xyz&l=it',
-    ]
-    for p in proxies:
-        try:
-            t = requests.get(p, headers={'User-Agent':'Mozilla/5.0 Chrome/124'}, timeout=8).text
-            # allorigins /get ritorna json {"contents":"..."}
-            if '"contents"' in t:
-                try:
-                    import json as js
-                    t = js.loads(t).get('contents','')
-                except: pass
-            if len(t) > 2000 and 'sgcaptcha' not in t and 'sucuri' not in t.lower():
-                return t
-        except: pass
     try:
-        return requests.get(url, headers={'User-Agent':'Mozilla/5.0'}, timeout=5).text
+        # proxy piu veloce, 4 sec max
+        p=f'https://api.codetabs.com/v1/proxy?quest={url}'
+        t=requests.get(p, headers={'User-Agent':'Mozilla/5.0'}, timeout=5).text
+        if len(t)>2000 and 'sgcaptcha' not in t:
+            return t
+    except: pass
+    try:
+        p2=f'https://api.allorigins.win/raw?url={url}'
+        t=requests.get(p2, headers={'User-Agent':'Mozilla/5.0'}, timeout=5).text
+        return t
     except: return ''
 
 def F(): return GET(U)
 
 @app.route('/')
-def home(): return f"ON V10 R1-R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
+def home(): return f"ON V11 R1-R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
 
 @app.route('/debug')
 def dbg():
-    logs=[]
-    url=U
-    proxies = [
-        f'https://api.codetabs.com/v1/proxy?quest={url}',
-        f'https://thingproxy.freeboard.io/fetch/{url}',
-        f'https://api.allorigins.win/raw?url={url}',
-        f'https://corsproxy.io/?{url}',
-        f'https://api.allorigins.win/get?url={url}',
-    ]
-    for p in proxies:
-        try:
-            t=requests.get(p, headers={'User-Agent':'Mozilla/5.0'}, timeout=8).text
-            if '"contents"' in t:
-                try:
-                    import json as js
-                    t=js.loads(t).get('contents','')
-                except: pass
-            logs.append({'proxy':p[:40],'len':len(t),'has_captcha':'sgcaptcha' in t})
-            if len(t)>2000 and 'sgcaptcha' not in t:
-                return jsonify({'len':len(t),'ok':True,'first':t[:250],'logs':logs})
-        except Exception as e:
-            logs.append({'proxy':p[:40],'err':str(e)[:100]})
-    h=F()
-    return jsonify({'len':len(h),'ok':len(h)>2000,'first':h[:250],'logs':logs})
+    try:
+        h=F()
+        # ritorna subito, non cicla
+        return jsonify({'len':len(h),'ok':len(h)>2000,'captcha':'sgcaptcha' in h,'first':h[:300]})
+    except Exception as e:
+        return jsonify({'len':0,'ok':False,'err':str(e)})
 
 @app.route('/live')
 def live():
     h=F()
-    if len(h)<800: return jsonify({'count':0,'len':len(h),'err':'bloccato'})
+    if len(h)<800: return jsonify({'count':0,'len':len(h),'err':'bloccato 181 - sucuri'})
     soup=BS(h,'html.parser')
     out=[]
     for tr in soup.find_all('tr'):
         txt=tr.get_text(' ',strip=True)
         if re.search(r'\d+\s*-\s*\d+',txt) and 10<len(txt)<250:
             out.append(txt[:180])
-    return jsonify({'count':len(out),'len':len(h),'live':out[:60]})
+    return jsonify({'count':len(out),'len':len(h),'live':out[:30]})
 
 @app.route('/scan')
 def scan():
     db=L(); fnd=[]; h=F()
-    if len(h)<800: return jsonify({'trovati':[],'tot':len(db),'len':len(h),'err':'bloccato - riprovo'})
+    if len(h)<800: return jsonify({'trovati':[],'tot':len(db),'len':len(h),'err':'bloccato 181'})
     soup=BS(h,'html.parser')
     last_a='A'; last_b='B'; last_m=0; last_ris=''
     for tr in soup.find_all('tr'):
