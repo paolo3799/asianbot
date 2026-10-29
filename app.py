@@ -31,13 +31,23 @@ def MAIL(sub,html):
 
 def GET(url):
     proxies = [
+        f'https://api.codetabs.com/v1/proxy?quest={url}',
+        f'https://thingproxy.freeboard.io/fetch/{url}',
         f'https://api.allorigins.win/raw?url={url}',
         f'https://corsproxy.io/?{url}',
+        f'https://api.allorigins.win/get?url={url}', # questo ritorna json
+        f'https://cc.bingj.com/cache.aspx?d=463-2-2822&u={url}&w=xyz&l=it',
     ]
     for p in proxies:
         try:
-            t = requests.get(p, headers={'User-Agent':'Mozilla/5.0 Chrome/124'}, timeout=6).text
-            if len(t) > 2000:
+            t = requests.get(p, headers={'User-Agent':'Mozilla/5.0 Chrome/124'}, timeout=8).text
+            # allorigins /get ritorna json {"contents":"..."}
+            if '"contents"' in t:
+                try:
+                    import json as js
+                    t = js.loads(t).get('contents','')
+                except: pass
+            if len(t) > 2000 and 'sgcaptcha' not in t and 'sucuri' not in t.lower():
                 return t
         except: pass
     try:
@@ -47,30 +57,46 @@ def GET(url):
 def F(): return GET(U)
 
 @app.route('/')
-def home(): return f"ON V9 R1-R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
+def home(): return f"ON V10 R1-R5 Tot:{len(L())} {DT.now().strftime('%H:%M')}"
 
 @app.route('/debug')
 def dbg():
-    try:
-        h=F()
-        return jsonify({'len':len(h),'ok':len(h)>2000,'first':h[:250]})
-    except Exception as e:
-        return jsonify({'len':0,'ok':False,'err':str(e)})
+    logs=[]
+    url=U
+    proxies = [
+        f'https://api.codetabs.com/v1/proxy?quest={url}',
+        f'https://thingproxy.freeboard.io/fetch/{url}',
+        f'https://api.allorigins.win/raw?url={url}',
+        f'https://corsproxy.io/?{url}',
+        f'https://api.allorigins.win/get?url={url}',
+    ]
+    for p in proxies:
+        try:
+            t=requests.get(p, headers={'User-Agent':'Mozilla/5.0'}, timeout=8).text
+            if '"contents"' in t:
+                try:
+                    import json as js
+                    t=js.loads(t).get('contents','')
+                except: pass
+            logs.append({'proxy':p[:40],'len':len(t),'has_captcha':'sgcaptcha' in t})
+            if len(t)>2000 and 'sgcaptcha' not in t:
+                return jsonify({'len':len(t),'ok':True,'first':t[:250],'logs':logs})
+        except Exception as e:
+            logs.append({'proxy':p[:40],'err':str(e)[:100]})
+    h=F()
+    return jsonify({'len':len(h),'ok':len(h)>2000,'first':h[:250],'logs':logs})
 
 @app.route('/live')
 def live():
-    try:
-        h=F()
-        if len(h)<800: return jsonify({'count':0,'len':len(h),'err':'bloccato'})
-        soup=BS(h,'html.parser')
-        out=[]
-        for tr in soup.find_all('tr'):
-            txt=tr.get_text(' ',strip=True)
-            if re.search(r'\d+\s*-\s*\d+',txt) and 10<len(txt)<250:
-                out.append(txt[:180])
-        return jsonify({'count':len(out),'len':len(h),'live':out[:60]})
-    except Exception as e:
-        return jsonify({'count':0,'err':str(e)})
+    h=F()
+    if len(h)<800: return jsonify({'count':0,'len':len(h),'err':'bloccato'})
+    soup=BS(h,'html.parser')
+    out=[]
+    for tr in soup.find_all('tr'):
+        txt=tr.get_text(' ',strip=True)
+        if re.search(r'\d+\s*-\s*\d+',txt) and 10<len(txt)<250:
+            out.append(txt[:180])
+    return jsonify({'count':len(out),'len':len(h),'live':out[:60]})
 
 @app.route('/scan')
 def scan():
@@ -117,10 +143,6 @@ def scan():
 
 @app.route('/reset')
 def reset(): S([]); return jsonify({'reset':True})
-@app.route('/stats')
-def stats(): return jsonify(L())
-@app.route('/test_mail')
-def test_mail(): return jsonify({'sent':MAIL('[TEST V9]','ok')})
 
 if __name__=='__main__':
     app.run(host='0.0.0.0',port=int(os.environ.get('PORT',10000)))
